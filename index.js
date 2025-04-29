@@ -101,6 +101,124 @@ const htmlTemplate = (matchesData) => `
   <title>${process.env.TOURNAMENT_NAME}</title>
   <meta http-equiv="refresh" content="15">
   <style>
+    :root {
+      --bg-dark: #121212;
+      --card-dark: #1e1e1e;
+      --text-dark: #e0e0e0;
+      --accent-dark:rgb(205, 197, 253);
+      --accent-secondary: #e77b3c;
+      --border-dark: #333;
+    }
+
+    body.dark-mode {
+      background: var(--bg-dark);
+      color: var(--text-dark);
+    }
+
+    .dark-mode .header {
+      background: #0d1b2a;
+      color: white;
+    }
+
+    .dark-mode .section {
+      background: var(--card-dark);
+      box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+      border: 1px solid var(--border-dark);
+    }
+
+    .dark-mode .section-title {
+      color: var(--accent-dark);
+      border-bottom: 1px solid var(--border-dark);
+    }
+
+    .dark-mode .match-card {
+      background: #252525;
+      box-shadow: 0 3px 6px rgba(0,0,0,0.3);
+      border-left: 6px solid;
+    }
+
+    .dark-mode  .started {
+      border-color:rgb(25, 105, 58);
+    }
+    .dark-mode .assigned {
+      border-color:rgb(145, 67, 23);
+    }
+
+    .dark-mode .status-started {
+      background: rgb(25, 105, 58);
+    }
+    .dark-mode .status-assigned {
+      background: rgb(145, 67, 23);
+    }
+
+    .dark-mode .station {
+      color: var(--accent-dark);
+      border-bottom: 1px solid var(--border-dark);
+    }
+
+    .dark-mode .players {
+      color: var(--text-dark);
+    }
+
+    .dark-mode .vs {
+      color: #aaa;
+    }
+
+    .dark-mode .pending-card {
+      background: #252525;
+      border-left: 4px solid rgb(46, 143, 204);
+    }
+
+    .dark-mode .footer {
+      color: #aaa;
+    }
+
+    /* Toggle Button */
+    .theme-toggle {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: var(--card-dark);
+      color: white;
+      border: none;
+      border-radius: 50%;
+      width: 50px;
+      height: 50px;
+      font-size: 1.5em;
+      cursor: pointer;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    body:not(.dark-mode) .theme-toggle {
+      background: #2c3e50;
+    }
+</style>
+
+<script>
+    // Dark Mode Toggle
+    document.addEventListener('DOMContentLoaded', () => {
+      const toggleBtn = document.createElement('button');
+      toggleBtn.className = 'theme-toggle';
+      toggleBtn.innerHTML = '🌓';
+      toggleBtn.title = 'Dark/Light Mode wechseln';
+      document.body.appendChild(toggleBtn);
+
+      toggleBtn.addEventListener('click', () => {
+        document.body.classList.toggle('dark-mode');
+        localStorage.setItem('darkMode', document.body.classList.contains('dark-mode'));
+      });
+
+      // Beim Laden prüfen
+      if (localStorage.getItem('darkMode') === 'true') {
+        document.body.classList.add('dark-mode');
+      }
+    });
+</script>
+  <style>
     body {
       font-family: Arial, sans-serif;
       background: #f5f5f5;
@@ -234,8 +352,8 @@ const htmlTemplate = (matchesData) => `
         <div class="match-card ${match.underwayAt ? "started" : "assigned"}">
             <div class="station">${match.station}
                       <div class="status ${
-              match.underwayAt ? "status-started" : "status-assigned"
-            }">
+                        match.underwayAt ? "status-started" : "status-assigned"
+                      }">
               ${match.underwayAt ? "Spiel läuft" : "warten auf Spieler"}
             </div>
           </div>
