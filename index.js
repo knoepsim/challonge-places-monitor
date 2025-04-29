@@ -232,8 +232,9 @@ const htmlTemplate = (matchesData) => `
         grid-template-columns: 1fr;
       }
     }
-  </style>
-    <style>
+
+    
+    
     :root {
       --bg-dark: #121212;
       --card-dark:rgba(30, 30, 30, 0.48);
@@ -322,28 +323,35 @@ const htmlTemplate = (matchesData) => `
     }
 
     /* Toggle Button */
-    .theme-toggle {
-      position: fixed;
-      bottom: 20px;
-      right: 20px;
-      background: var(--card-dark);
-      color: white;
-      border: none;
-      border-radius: 50%;
-      width: 50px;
-      height: 50px;
-      font-size: 1.5em;
-      cursor: pointer;
-      box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-      z-index: 1000;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
+.theme-toggle {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: var(--card-dark);
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 50px;
+  height: 50px;
+  font-size: 1.5em;
+  cursor: pointer;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
 
-    body:not(.dark-mode) .theme-toggle {
-      background: #2c3e50;
-    }
+body:hover .theme-toggle,
+.theme-toggle:focus {
+  opacity: 1;
+}
+
+body:not(.dark-mode) .theme-toggle {
+  background: #2c3e50;
+}
 </style>
 
 <script>
@@ -352,12 +360,57 @@ const htmlTemplate = (matchesData) => `
       const toggleBtn = document.createElement('button');
       toggleBtn.className = 'theme-toggle';
       toggleBtn.innerHTML = '🌓';
-      toggleBtn.title = 'Dark/Light Mode wechseln';
+      toggleBtn.title = 'Dark/Light Mode wechseln (Taste: T)';
+      toggleBtn.setAttribute('aria-label', 'Theme wechseln');
+      toggleBtn.tabIndex = 0; // Macht den Button fokussierbar
       document.body.appendChild(toggleBtn);
 
-      toggleBtn.addEventListener('click', () => {
+      // Mouseover für den ganzen rechten Bereich
+      const rightEdge = document.createElement('div');
+      rightEdge.style.position = 'fixed';
+      rightEdge.style.right = '0';
+      rightEdge.style.top = '0';
+      rightEdge.style.width = '50px';
+      rightEdge.style.height = '100vh';
+      rightEdge.style.zIndex = '999';
+      document.body.appendChild(rightEdge);
+
+      let showTimeout;
+      rightEdge.addEventListener('mouseenter', () => {
+        clearTimeout(showTimeout);
+        toggleBtn.style.opacity = '1';
+      });
+
+      rightEdge.addEventListener('mouseleave', () => {
+        // Nur ausblenden wenn nicht fokussiert
+        if (!toggleBtn.matches(':focus')) {
+          showTimeout = setTimeout(() => {
+            toggleBtn.style.opacity = '0';
+          }, 1000);
+        }
+      });
+
+      // Toggle-Funktion
+      const toggleTheme = () => {
         document.body.classList.toggle('dark-mode');
         localStorage.setItem('darkMode', document.body.classList.contains('dark-mode'));
+      };
+
+      // Klick-Event
+      toggleBtn.addEventListener('click', toggleTheme);
+
+      // Tastatur-Event
+      document.addEventListener('keydown', (e) => {
+        if (e.key.toLowerCase() === 't') {
+          toggleTheme();
+          // Button kurz anzeigen bei Tastendruck
+          toggleBtn.style.opacity = '1';
+          setTimeout(() => {
+            if (!toggleBtn.matches(':hover, :focus')) {
+              toggleBtn.style.opacity = '0';
+            }
+          }, 2000);
+        }
       });
 
       // Beim Laden prüfen
