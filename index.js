@@ -103,14 +103,15 @@ const htmlTemplate = (matchesData) => `
   <style>
     body {
       font-family: "Tahoma", sans-serif;
-      background: #f5f5f5;
+      background: 
+        linear-gradient(rgba(245, 245, 245, 0.3), rgba(245, 245, 245, 0.3)),
+        url('/bg.png') center/cover no-repeat fixed;
       letter-spacing: 0.08em;
-
       margin: 0;
       padding: 20px;
     }
     .header {
-      background: #2c3e50;
+      background: none;
       color: white;
       text-align: center;
       padding: 1px;
@@ -121,7 +122,7 @@ const htmlTemplate = (matchesData) => `
       font-size: 2.5em;
     }
     .section {
-      background: white;
+      background:rgba(255, 255, 255, 0.7);
       border-radius: 5px;
       padding: 20px;
       margin-bottom: 20px;
@@ -141,7 +142,7 @@ const htmlTemplate = (matchesData) => `
       margin-top: 15px;
     }
     .match-card {
-      background: #fff;
+      background:rgba(255, 255, 255, 0.6);
       border-radius: 5px;
       padding: 15px;
       box-shadow: 0 2px 5px rgba(0, 0, 0, 0.26);
@@ -203,7 +204,7 @@ const htmlTemplate = (matchesData) => `
       margin-top: 15px;
     }
     .pending-card {
-      background: #fff;
+      background:rgba(255, 255, 255, 0.6);
       border-radius: 5px;
       padding: 15px;
       box-shadow: 0 1px 3px rgba(0,0,0,0.1);
@@ -211,10 +212,15 @@ const htmlTemplate = (matchesData) => `
       font-size: 1.1em;
     }
     .footer {
-      text-align: center;
+      margin-left: auto;
+      margin-right: auto;
       margin-top: 20px;
-      color: #7f8c8d;
+      color:rgb(54, 54, 54);
       font-size: 0.9em;
+      background-color:rgba(245, 245, 245, 0.69);
+      border-radius: 5px;
+      padding: 10px;
+      width: fit-content;
     }
     @media (max-width: 900px) {
       .matches-grid {
@@ -230,7 +236,7 @@ const htmlTemplate = (matchesData) => `
     <style>
     :root {
       --bg-dark: #121212;
-      --card-dark: #1e1e1e;
+      --card-dark:rgba(30, 30, 30, 0.48);
       --text-dark: #e0e0e0;
       --accent-dark:rgb(205, 197, 253);
       --accent-secondary: #e77b3c;
@@ -240,10 +246,13 @@ const htmlTemplate = (matchesData) => `
     body.dark-mode {
       background: var(--bg-dark);
       color: var(--text-dark);
+        background: 
+    linear-gradient(rgba(18, 18, 18, 0.85), rgba(18, 18, 18, 0.85)),
+    url('/bg.png') center/cover no-repeat fixed !important;
     }
 
     .dark-mode .header {
-      background: #0d1b2a;
+      background: none;
       color: white;
     }
 
@@ -298,6 +307,18 @@ const htmlTemplate = (matchesData) => `
 
     .dark-mode .footer {
       color: #aaa;
+    }
+
+      .dark-mode .footer {
+      margin-left: auto;
+      margin-right: auto;
+      margin-top: 20px;
+      color:var(--text-dark);
+      font-size: 0.9em;
+      background: var(--card-dark);
+      border-radius: 5px;
+      padding: 10px;
+      width: fit-content;
     }
 
     /* Toggle Button */
@@ -421,3 +442,5 @@ app.listen(PORT, () => {
   updateMatches();
   setInterval(updateMatches, process.env.UPDATE_INTERVAL);
 });
+
+app.use(express.static(path.join(__dirname, "public")));
