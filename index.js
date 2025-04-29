@@ -110,10 +110,13 @@ const htmlTemplate = (matchesData) => `
     .header {
       background: #2c3e50;
       color: white;
-      padding: 20px;
       text-align: center;
+      padding: 1px;
       margin-bottom: 20px;
       border-radius: 5px;
+    }
+    .header h1 {
+      font-size: 2.5em;
     }
     .section {
       background: white;
@@ -127,6 +130,7 @@ const htmlTemplate = (matchesData) => `
       margin-top: 0;
       padding-bottom: 10px;
       border-bottom: 1px solid #eee;
+      font-size: 1em;
     }
     .matches-grid {
       display: grid;
@@ -138,22 +142,24 @@ const htmlTemplate = (matchesData) => `
       background: #fff;
       border-radius: 5px;
       padding: 15px;
-      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-      border-left: 4px solid;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.26);
+      border-left: 6px solid;
     }
     .started {
       border-color: #2ecc71;
     }
     .assigned {
-      border-color: #e74c3c;
+      border-color:#e77b3c;
     }
     .station {
       font-weight: bold;
       color: #2c3e50;
-      margin-bottom: 10px;
+      margin-bottom: 20px;
+      font-size: 1.4em;
+      border-bottom: 1px solid #eee;
     }
     .players {
-      font-size: 1.1em;
+      font-size: 1.8em;
       margin: 5px 0;
     }
     .vs {
@@ -162,18 +168,19 @@ const htmlTemplate = (matchesData) => `
       font-style: italic;
     }
     .status {
-      font-size: 0.9em;
+      font-size: 0.7em;
       margin-top: 10px;
       padding: 5px;
       border-radius: 3px;
       color: white;
       display: inline-block;
+      float: right;
     }
     .status-started {
       background: #2ecc71;
     }
     .status-assigned {
-      background: #e74c3c;
+      background: #e77b3c;
     }
     .timestamp {
      float: right;
@@ -190,10 +197,10 @@ const htmlTemplate = (matchesData) => `
     .pending-card {
       background: #fff;
       border-radius: 5px;
-      padding: 10px;
+      padding: 15px;
       box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-      border-left: 3px solid rgb(46, 143, 204);
-      font-size: 0.9em;
+      border-left: 4px solid rgb(46, 143, 204);
+      font-size: 1.1em;
     }
     .footer {
       text-align: center;
@@ -225,15 +232,17 @@ const htmlTemplate = (matchesData) => `
         .map(
           (match) => `
         <div class="match-card ${match.underwayAt ? "started" : "assigned"}">
-          <div class="station">${match.station}</div>
+            <div class="station">${match.station}
+                      <div class="status ${
+              match.underwayAt ? "status-started" : "status-assigned"
+            }">
+              ${match.underwayAt ? "Spiel läuft" : "warten auf Spieler"}
+            </div>
+          </div>
           <div class="players">${match.player1}</div>
           <div class="vs">vs</div>
           <div class="players">${match.player2}</div>
-          <div class="status ${
-            match.underwayAt ? "status-started" : "status-assigned"
-          }">
-            ${match.underwayAt ? "Spiel läuft" : "Tisch zugewiesen"}
-          </div>
+
           <div class="timestamp">seit ${
             match.underwayAt
               ? new Date(match.underwayAt).toLocaleTimeString()
@@ -281,8 +290,8 @@ app.get("/", (req, res) => {
 });
 
 app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-    console.log(`Tournament: ${process.env.TOURNAMENT_NAME}`);
-    updateMatches();
-    setInterval(updateMatches, process.env.UPDATE_INTERVAL);
-  });
+  console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`Tournament: ${process.env.TOURNAMENT_NAME}`);
+  updateMatches();
+  setInterval(updateMatches, process.env.UPDATE_INTERVAL);
+});
