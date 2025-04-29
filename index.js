@@ -101,6 +101,133 @@ const htmlTemplate = (matchesData) => `
   <title>${process.env.TOURNAMENT_NAME}</title>
   <meta http-equiv="refresh" content="15">
   <style>
+    body {
+      font-family: "Tahoma", sans-serif;
+      background: #f5f5f5;
+      letter-spacing: 0.08em;
+
+      margin: 0;
+      padding: 20px;
+    }
+    .header {
+      background: #2c3e50;
+      color: white;
+      text-align: center;
+      padding: 1px;
+      margin-bottom: 20px;
+      border-radius: 5px;
+    }
+    .header h1 {
+      font-size: 2.5em;
+    }
+    .section {
+      background: white;
+      border-radius: 5px;
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
+    .section-title {
+      color: #2c3e50;
+      margin-top: 0;
+      padding-bottom: 10px;
+      border-bottom: 1px solid #eee;
+      font-size: 1em;
+    }
+    .matches-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 15px;
+      margin-top: 15px;
+    }
+    .match-card {
+      background: #fff;
+      border-radius: 5px;
+      padding: 15px;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.26);
+      border-left: 6px solid;
+    }
+    .started {
+      border-color:rgb(38, 165, 91);
+    }
+    .assigned {
+      border-color:#e77b3c;
+    }
+    .station {
+      font-weight: bold;
+      color: #2c3e50;
+      margin-bottom: 20px;
+      font-size: 1.4em;
+      border-bottom: 1px solid #eee;
+    }
+    .players {
+      font-size: 1.8em;
+      margin: 5px 0;
+    }
+    .vs {
+      color: #7f8c8d;
+      margin: 5px 0;
+      font-style: italic;
+    }
+    .vs2 {
+      color: #7f8c8d;
+      margin: 5px 0;
+      font-style: italic;
+      font-size: 0.6em;
+    }
+    .status {
+      font-size: 0.7em;
+      margin-top: 10px;
+      padding: 5px;
+      border-radius: 3px;
+      color: white;
+      display: inline-block;
+      float: right;
+    }
+    .status-started {
+      background: rgb(38, 165, 91);
+    }
+    .status-assigned {
+      background: #e77b3c;
+    }
+    .timestamp {
+     float: right;
+      font-size: 0.8em;
+      color: #95a5a6;
+      margin-top: 5px;
+    }
+    .pending-matches {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 10px;
+      margin-top: 15px;
+    }
+    .pending-card {
+      background: #fff;
+      border-radius: 5px;
+      padding: 15px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      border-left: 4px solid rgb(46, 143, 204);
+      font-size: 1.1em;
+    }
+    .footer {
+      text-align: center;
+      margin-top: 20px;
+      color: #7f8c8d;
+      font-size: 0.9em;
+    }
+    @media (max-width: 900px) {
+      .matches-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+    @media (max-width: 600px) {
+      .matches-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+    <style>
     :root {
       --bg-dark: #121212;
       --card-dark: #1e1e1e;
@@ -218,125 +345,6 @@ const htmlTemplate = (matchesData) => `
       }
     });
 </script>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      background: #f5f5f5;
-      margin: 0;
-      padding: 20px;
-    }
-    .header {
-      background: #2c3e50;
-      color: white;
-      text-align: center;
-      padding: 1px;
-      margin-bottom: 20px;
-      border-radius: 5px;
-    }
-    .header h1 {
-      font-size: 2.5em;
-    }
-    .section {
-      background: white;
-      border-radius: 5px;
-      padding: 20px;
-      margin-bottom: 20px;
-      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-    }
-    .section-title {
-      color: #2c3e50;
-      margin-top: 0;
-      padding-bottom: 10px;
-      border-bottom: 1px solid #eee;
-      font-size: 1em;
-    }
-    .matches-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 15px;
-      margin-top: 15px;
-    }
-    .match-card {
-      background: #fff;
-      border-radius: 5px;
-      padding: 15px;
-      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.26);
-      border-left: 6px solid;
-    }
-    .started {
-      border-color: #2ecc71;
-    }
-    .assigned {
-      border-color:#e77b3c;
-    }
-    .station {
-      font-weight: bold;
-      color: #2c3e50;
-      margin-bottom: 20px;
-      font-size: 1.4em;
-      border-bottom: 1px solid #eee;
-    }
-    .players {
-      font-size: 1.8em;
-      margin: 5px 0;
-    }
-    .vs {
-      color: #7f8c8d;
-      margin: 5px 0;
-      font-style: italic;
-    }
-    .status {
-      font-size: 0.7em;
-      margin-top: 10px;
-      padding: 5px;
-      border-radius: 3px;
-      color: white;
-      display: inline-block;
-      float: right;
-    }
-    .status-started {
-      background: #2ecc71;
-    }
-    .status-assigned {
-      background: #e77b3c;
-    }
-    .timestamp {
-     float: right;
-      font-size: 0.8em;
-      color: #95a5a6;
-      margin-top: 5px;
-    }
-    .pending-matches {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-      gap: 10px;
-      margin-top: 15px;
-    }
-    .pending-card {
-      background: #fff;
-      border-radius: 5px;
-      padding: 15px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-      border-left: 4px solid rgb(46, 143, 204);
-      font-size: 1.1em;
-    }
-    .footer {
-      text-align: center;
-      margin-top: 20px;
-      color: #7f8c8d;
-      font-size: 0.9em;
-    }
-    @media (max-width: 900px) {
-      .matches-grid {
-        grid-template-columns: repeat(2, 1fr);
-      }
-    }
-    @media (max-width: 600px) {
-      .matches-grid {
-        grid-template-columns: 1fr;
-      }
-    }
-  </style>
 </head>
 <body>
   <div class="header">
@@ -377,7 +385,7 @@ const htmlTemplate = (matchesData) => `
     matchesData.pending.length > 0
       ? `
     <div class="section">
-      <h2 class="section-title">Geplante Spiele (${
+      <h2 class="section-title">Nächste Spiele (${
         matchesData.pending.length
       })</h2>
       <div class="pending-matches">
@@ -385,7 +393,7 @@ const htmlTemplate = (matchesData) => `
           .map(
             (match) => `
           <div class="pending-card">
-            <div>${match.player1} <div class="vs">vs</div> ${match.player2}</div>
+            <div>${match.player1} <div class="vs2">vs</div> ${match.player2}</div>
           </div>
         `
           )
