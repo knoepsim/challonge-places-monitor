@@ -42,17 +42,26 @@ const matchesCache = {};
 const cacheTimestamps = {};
 const CACHE_INTERVAL = Number(process.env.UPDATE_INTERVAL) || 15000;
 
+// Logging je nach .env-Parameter
+const LOG_ENABLED = process.env.LOG_ENABLED === "true";
+
+function log(...args) {
+  if (LOG_ENABLED) {
+    console.log(...args);
+  }
+}
+
 // updateMatches aktualisiert Cache für eine Turnier-ID
 async function updateMatches(tournamentId) {
   const tId = tournamentId || process.env.TOURNAMENT_ID;
   try {
+    log(`[API CALL] Fetching data for tournament ID: ${tId}`);
     const matchesRes = await apiClient.get(
       `/tournaments/${tId}/matches.json`
     );
     const stationsRes = await apiClient.get(
       `/tournaments/${tId}/stations.json`
     );
-
     const participants = {};
     matchesRes.data.included?.forEach((item) => {
       if (item.type === "participant") {
@@ -113,6 +122,9 @@ async function getMatchesData(tId) {
     now - cacheTimestamps[tId] > CACHE_INTERVAL
   ) {
     await updateMatches(tId);
+    log(`[CACHE MISS] Updated cache for tournament ID: ${tId}`);
+  } else {
+    log(`[CACHE READ] Served cached data for tournament ID: ${tId}`);
   }
   return matchesCache[tId] || { active: [], pending: [] };
 }
@@ -445,10 +457,11 @@ body:not(.dark-mode) .theme-toggle {
 </script>
 </head>
 <body>
-  <div class="header">
-    <h1>${process.env.TOURNAMENT_NAME}</h1>
-  </div>
-
+<!-----   
+<div class="header">
+     <h1>${process.env.TOURNAMENT_NAME}</h1>
+   </div>
+----->
   <div class="section">
     <h2 class="section-title">Aktuelle Spiele</h2>
     <div class="matches-grid">
@@ -510,16 +523,63 @@ body:not(.dark-mode) .theme-toggle {
 `;
 
 app.get("/", async (req, res) => {
-  const tId = req.query.tId || process.env.TOURNAMENT_ID;
-  const tournamentName = process.env.TOURNAMENT_NAME; // Immer aus .env
+  const tId = req.query.tId || "";
+  const tournamentName = process.env.TOURNAMENT_NAME;
+
+  if (!tId) {
+    // Zeige Eingabefeld für Turnier-ID
+    return res.send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Turnier auswählen</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+              body {
+      font-family: "Tahoma", sans-serif;
+      background: 
+        linear-gradient(rgba(245, 245, 245, 0.3), rgba(245, 245, 245, 0.3)),
+        url('/bg.png') center/cover no-repeat fixed;
+      letter-spacing: 0.08em;
+display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0;
+    }
+          .input-container { background: white; padding: 30px 40px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+          h1 { margin-bottom: 20px; }
+          input[type="text"] { padding: 10px; font-size: 1.1em; border: 1px solid #ccc; border-radius: 4px; width: 220px; }
+          button { padding: 10px 20px; font-size: 1.1em; border: none; border-radius: 4px; background: #2c3e50; color: white; margin-left: 10px; cursor: pointer; }
+          button:hover { background: #1a232c; }
+        </style>
+      </head>
+      <body>
+        <div class="input-container">
+          <h1>Turnier-ID eingeben</h1>
+          <form id="tournamentForm" autocomplete="off">
+            <input type="text" id="tIdInput" name="tId" placeholder="Turnier-ID" required autofocus>
+            <button type="submit">Anzeigen</button>
+          </form>
+        </div>
+        <script>
+          document.getElementById('tournamentForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const tId = document.getElementById('tIdInput').value.trim();
+            if (tId) {
+              window.location.href = '/?tId=' + encodeURIComponent(tId);
+            }
+          });
+        </script>
+      </body>
+      </html>
+    `);
+  }
+
   const data = await getMatchesData(tId);
-  console.log(`Served data for tournament ID: ${tId}`);
+  log(`[PAGE LOAD] Served data for tournament ID: ${tId}`);
   res.send(htmlTemplate(data, tournamentName));
 });
 
 app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-  console.log(`Title: ${process.env.TOURNAMENT_NAME}`);
+  console.log(`[INITIAL] Server running on http://localhost:${PORT}`);
+  console.log(`[INITIAL] Title: ${process.env.TOURNAMENT_NAME}`);
 });
 
 app.use(express.static(path.join(__dirname, "public")));
