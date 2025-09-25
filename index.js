@@ -37,13 +37,20 @@ function getTableNumber(stationName) {
   return match ? parseInt(match[0]) : Infinity;
 }
 
-async function updateMatches() {
+// Cache für Matches pro Turnier-ID
+const matchesCache = {};
+const cacheTimestamps = {};
+const CACHE_INTERVAL = Number(process.env.UPDATE_INTERVAL) || 15000;
+
+// updateMatches aktualisiert Cache für eine Turnier-ID
+async function updateMatches(tournamentId) {
+  const tId = tournamentId || process.env.TOURNAMENT_ID;
   try {
     const matchesRes = await apiClient.get(
-      `/tournaments/${process.env.TOURNAMENT_ID}/matches.json`
+      `/tournaments/${tId}/matches.json`
     );
     const stationsRes = await apiClient.get(
-      `/tournaments/${process.env.TOURNAMENT_ID}/stations.json`
+      `/tournaments/${tId}/stations.json`
     );
 
     const participants = {};
@@ -61,7 +68,7 @@ async function updateMatches() {
     });
 
     // Reset data
-    matchesData = { active: [], pending: [] };
+    const newData = { active: [], pending: [] };
 
     matchesRes.data.data.forEach((match) => {
       const matchData = {
@@ -76,29 +83,46 @@ async function updateMatches() {
       };
 
       if (match.attributes?.state === "open") {
-        matchesData.active.push(matchData); // Alle aktiven Spiele (gestartet oder zugewiesen)
+        newData.active.push(matchData);
       } else if (match.attributes?.state === "pending") {
-        matchesData.pending.push(matchData); // Geplant
+        newData.pending.push(matchData);
       }
     });
 
     // Sortierung
-    matchesData.active.sort(
+    newData.active.sort(
       (a, b) => getTableNumber(a.station) - getTableNumber(b.station)
     );
-    matchesData.pending.sort(
+    newData.pending.sort(
       (a, b) => a.suggestedPlayOrder - b.suggestedPlayOrder
     );
+
+    matchesCache[tId] = newData;
+    cacheTimestamps[tId] = Date.now();
   } catch (error) {
     console.error("Update error:", error.message);
   }
 }
 
-const htmlTemplate = (matchesData) => `
+// Holt Daten aus Cache oder aktualisiert sie, falls älter als CACHE_INTERVAL
+async function getMatchesData(tId) {
+  const now = Date.now();
+  if (
+    !matchesCache[tId] ||
+    !cacheTimestamps[tId] ||
+    now - cacheTimestamps[tId] > CACHE_INTERVAL
+  ) {
+    await updateMatches(tId);
+  }
+  return matchesCache[tId] || { active: [], pending: [] };
+}
+
+// htmlTemplate bekommt jetzt auch tournamentName
+const htmlTemplate = (matchesData, tournamentName) => `
 <!DOCTYPE html>
 <html>
 <head>
-  <title>${process.env.TOURNAMENT_NAME}</title>
+  <title>${tournamentName}</title>
   <meta http-equiv="refresh" content="15">
   <style>
     body {
@@ -485,15 +509,17 @@ body:not(.dark-mode) .theme-toggle {
 </html>
 `;
 
-app.get("/", (req, res) => {
-  res.send(htmlTemplate(matchesData));
+app.get("/", async (req, res) => {
+  const tId = req.query.tId || process.env.TOURNAMENT_ID;
+  const tournamentName = process.env.TOURNAMENT_NAME; // Immer aus .env
+  const data = await getMatchesData(tId);
+  console.log(`Served data for tournament ID: ${tId}`);
+  res.send(htmlTemplate(data, tournamentName));
 });
 
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
-  console.log(`Tournament: ${process.env.TOURNAMENT_NAME}`);
-  updateMatches();
-  setInterval(updateMatches, process.env.UPDATE_INTERVAL);
+  console.log(`Title: ${process.env.TOURNAMENT_NAME}`);
 });
 
 app.use(express.static(path.join(__dirname, "public")));
