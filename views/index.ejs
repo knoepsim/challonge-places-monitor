@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>
+    <%= tournamentName %>
+  </title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="<%= webRefreshInterval %>">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/theme.js"></script>
+</head>
+
+<body id="app-body">
+  <div id="progress-bar"></div>
+  <div id="offline-badge" class="toast-modern" style="display: none;">
+    <div class="pulse-dot"></div>
+    <span>Verbindung unterbrochen. Verbinde neu...</span>
+  </div>
+  <div id="content-wrapper">
+    <div class="dashboard-layout <%= matchesData.pending.length > 0 ? 'has-sidebar' : '' %>">
+      <div class="section main-section">
+        <h2 class="section-title">Aktuelle Spiele</h2>
+        <div class="matches-grid">
+          <% matchesData.active.forEach(function(match) { %>
+            <div class="match-card <%= match.underwayAt ? 'started' : 'assigned' %>">
+              <div class="station">
+                <%= match.station %>
+                  <div class="status <%= match.underwayAt ? 'status-started' : 'status-assigned' %>">
+                    <% if(match.underwayAt) { %>
+                      <div class="pulse-dot-white"></div>SPIEL LÄUFT
+                      <% } else { %>
+                        <div class="pulse-dot-white"></div>WARTET
+                        <% } %>
+                  </div>
+              </div>
+              <div class="players">
+                <%= match.player1 %>
+              </div>
+              <div class="vs">vs</div>
+              <div class="players">
+                <%= match.player2 %>
+              </div>
+
+              <div class="live-timer" data-time="<%= match.underwayAt || match.startedAt %>"
+                data-status="<%= match.underwayAt ? 'started' : 'assigned' %>">
+              </div>
+            </div>
+            <% }); %>
+        </div>
+      </div>
+
+      <% if (matchesData.pending.length> 0) { %>
+        <div class="section side-section">
+          <h2 class="section-title">Nächste Spiele (<%= matchesData.pending.length %>)</h2>
+          <div class="pending-matches">
+            <% matchesData.pending.forEach(function(match) { %>
+              <div class="pending-card">
+                <div>
+                  <%= match.player1 %>
+                </div>
+                <div class="vs2">vs</div>
+                <div>
+                  <%= match.player2 %>
+                </div>
+              </div>
+              <% }); %>
+          </div>
+        </div>
+        <% } %>
+    </div>
+
+    <div class="footer">
+      Letzte Aktualisierung: <%= new Date().toLocaleTimeString() %>
+    </div>
+
+  </div> <!-- close content-wrapper -->
+  <script>
+    const intervalMs = Number("<%= webRefreshInterval * 1000 %>");
+
+    function startProgress() {
+      const pb = document.getElementById('progress-bar');
+      if (pb) {
+        pb.style.transition = 'none';
+        pb.style.width = '0%';
+        setTimeout(() => {
+          pb.style.transition = `width ${intervalMs}ms linear`;
+          pb.style.width = '100%';
+        }, 50);
+      }
+    }
+    startProgress();
+
+    // AJAX Auto-Refresh without page reload
+    setInterval(async () => {
+      try {
+        const res = await fetch(window.location.href);
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const html = await res.text();
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+
+        const wrapper = document.getElementById('content-wrapper');
+        wrapper.innerHTML = doc.getElementById('content-wrapper').innerHTML;
+        const badge = document.getElementById('offline-badge');
+        if (badge.style.display !== 'none') badge.style.display = 'none';
+        startProgress();
+        updateTimers();
+
+      } catch (e) {
+        console.error("Auto-refresh failed", e);
+        const badge = document.getElementById('offline-badge');
+        if (badge.style.display !== 'flex') badge.style.display = 'flex';
+      }
+    }, intervalMs);
+
+    function updateTimers() {
+      document.querySelectorAll('.live-timer').forEach(el => {
+        const timeStr = el.getAttribute('data-time');
+        const status = el.getAttribute('data-status');
+        if (!timeStr) return;
+
+        const start = new Date(timeStr);
+        const now = new Date();
+        const diffSeconds = Math.floor((now - start) / 1000);
+        if (diffSeconds < 0) return;
+
+        const h = Math.floor(diffSeconds / 3600);
+        const m = Math.floor((diffSeconds % 3600) / 60);
+        const s = diffSeconds % 60;
+        const formatted = h > 0
+          ? `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+          : `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+
+        if (status === 'started') {
+          el.textContent = `spielt seit ${formatted}`;
+          el.classList.remove('timer-urgent');
+        } else {
+          el.textContent = `wartet seit ${formatted}`;
+          // Rot markieren, wenn länger als 5 Minuten (300s) gewartet wird
+          if (diffSeconds > 300) {
+            el.classList.add('timer-urgent');
+          }
+        }
+      });
+    }
+
+    // Uhren jede Sekunde updaten
+    setInterval(updateTimers, 1000);
+    updateTimers();
+  </script>
+</body>
+
+</html>

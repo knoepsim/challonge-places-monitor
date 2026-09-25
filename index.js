@@ -4,20 +4,56 @@ import https from "https";
 import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
+import fs from "fs/promises";
+import util from "util";
 
-// ES Modules workaround für __dirname
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Environment Variablen laden
 dotenv.config({ path: path.join(__dirname, ".env") });
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+app.set("view engine", "ejs");
+app.set("views", path.join(__dirname, "views"));
+app.use(express.static(path.join(__dirname, "public")));
+app.use(express.urlencoded({ extended: false }));
+app.use(express.json());
 
-// API Client konfigurieren
+app.use((req, res, next) => {
+  if (process.env.LOG_ENABLED === "true") {
+    console.log(`[WEBAPP] ${req.method} ${req.url}`);
+  }
+  next();
+});
+const PORT = process.env.PORT || 3000;
+const LOG_ENABLED = process.env.LOG_ENABLED === "true";
+const CHALLONGE_API_BASE_URL =
+  process.env.CHALLONGE_API_BASE_URL || "https://api.challonge.com/v2.1";
+const MAX_LOG_CHARS = Number(process.env.API_LOG_MAX_CHARS) || 8000;
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "admin";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "pw123";
+const PARTICIPANTS_STATE_FILE = path.join(
+  __dirname,
+  "data",
+  "participants-state.json"
+);
+
+function formatLogValue(value) {
+  if (value === undefined) return "<empty>";
+  let output;
+  try {
+    output = typeof value === "string" ? value : JSON.stringify(value, null, 2) || String(value);
+  } catch {
+    output = util.inspect(value, { depth: 5, maxArrayLength: 50 });
+  }
+  if (output.length > MAX_LOG_CHARS) {
+    return `${output.slice(0, MAX_LOG_CHARS)}\n... <truncated>`;
+  }
+  return output;
+}
+
 const apiClient = axios.create({
-  baseURL: "https://api.challonge.com/v2",
+  baseURL: CHALLONGE_API_BASE_URL,
   httpsAgent: new https.Agent({ keepAlive: true }),
   headers: {
     Authorization: process.env.CHALLONGE_API_KEY,
@@ -27,84 +63,315 @@ const apiClient = axios.create({
   },
 });
 
-let matchesData = {
-  active: [],
-  pending: [],
-};
+apiClient.interceptors.request.use((config) => {
+  if (LOG_ENABLED) {
+    config.metadata = { startTime: Date.now() };
+    const method = (config.method || "get").toUpperCase();
+    const url = `${config.baseURL || ""}${config.url || ""}`;
+    console.log(`[API REQUEST] ${method} ${url}`);
+  }
+  return config;
+});
+
+apiClient.interceptors.response.use(
+  (response) => {
+    if (LOG_ENABLED) {
+      const startTime = response.config.metadata?.startTime;
+      const duration = startTime ? Date.now() - startTime : "?";
+      const method = (response.config.method || "get").toUpperCase();
+      const url = `${response.config.baseURL || ""}${response.config.url || ""}`;
+      console.log(`[API RESPONSE] ${method} ${url} -> ${response.status} (${duration}ms)`);
+    }
+    return response;
+  },
+  (error) => {
+    if (LOG_ENABLED) {
+      const config = error.config || {};
+      const startTime = config.metadata?.startTime;
+      const duration = startTime ? Date.now() - startTime : "?";
+      const method = (config.method || "get").toUpperCase();
+      const url = `${config.baseURL || ""}${config.url || ""}`;
+      const status = error.response?.status || "ERR";
+      console.error(`[API ERROR] ${method} ${url} -> ${status} (${duration}ms)`);
+    }
+    return Promise.reject(error);
+  }
+);
+
+let matchesCache = {};
+let cacheTimestamps = {};
+let participantsCache = {};
+let participantsDetailsCache = {};
+let participantsCacheLoaded = {};
+const CACHE_INTERVAL = Number(process.env.API_CACHE_INTERVAL) || 60000;
+const WEB_REFRESH_INTERVAL = Number(process.env.WEB_REFRESH_INTERVAL) || 15;
+
+function log(...args) {
+  if (LOG_ENABLED) console.log(...args);
+}
 
 function getTableNumber(stationName) {
   const match = stationName?.match(/\d+/);
   return match ? parseInt(match[0]) : Infinity;
 }
 
-// Cache für Matches pro Turnier-ID
-const matchesCache = {};
-const cacheTimestamps = {};
-const CACHE_INTERVAL = Number(process.env.UPDATE_INTERVAL) || 15000;
+function getTimestampValue(timestamps, camelKey, snakeKey) {
+  return timestamps?.[snakeKey] || timestamps?.[camelKey] || null;
+}
 
-// Logging je nach .env-Parameter
-const LOG_ENABLED = process.env.LOG_ENABLED === "true";
+function createEmptyParticipantState(tournamentId) {
+  return {
+    tournamentId,
+    updatedAt: null,
+    displayMode: "matches",
+    participants: {},
+  };
+}
 
-function log(...args) {
-  if (LOG_ENABLED) {
-    console.log(...args);
+function createEmptyParticipantsStore() {
+  return { tournaments: {} };
+}
+
+let inMemoryStore = null;
+
+async function readParticipantsStore() {
+  if (inMemoryStore) return inMemoryStore;
+  try {
+    const raw = await fs.readFile(PARTICIPANTS_STATE_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    if (parsed?.tournaments) {
+      const normalizedTournaments = {};
+      for (const [tournamentId, tournamentState] of Object.entries(parsed.tournaments || {})) {
+        normalizedTournaments[tournamentId] = {
+          tournamentId,
+          updatedAt: tournamentState?.updatedAt || null,
+          displayMode: tournamentState?.displayMode || "matches",
+          participants: tournamentState?.participants || {},
+        };
+      }
+      inMemoryStore = { tournaments: normalizedTournaments };
+      return inMemoryStore;
+    }
+    if (parsed?.tournamentId && parsed?.participants) {
+      inMemoryStore = {
+        tournaments: {
+          [parsed.tournamentId]: {
+            tournamentId: parsed.tournamentId,
+            updatedAt: parsed.updatedAt || null,
+            displayMode: parsed.displayMode || "matches",
+            participants: parsed.participants || {},
+          },
+        },
+      };
+      return inMemoryStore;
+    }
+    inMemoryStore = createEmptyParticipantsStore();
+    return inMemoryStore;
+  } catch {
+    inMemoryStore = createEmptyParticipantsStore();
+    return inMemoryStore;
   }
 }
 
-// updateMatches aktualisiert Cache für eine Turnier-ID
+async function writeParticipantsStore(store) {
+  inMemoryStore = store;
+  await fs.mkdir(path.dirname(PARTICIPANTS_STATE_FILE), { recursive: true });
+  await fs.writeFile(PARTICIPANTS_STATE_FILE, `${JSON.stringify(store, null, 2)}\n`, "utf8");
+}
+
+async function getParticipantsFromStore(tournamentId) {
+  const store = await readParticipantsStore();
+  const state = store.tournaments?.[tournamentId] || createEmptyParticipantState(tournamentId);
+
+  const participantDetails = Object.values(state.participants || {}).map((participant) => ({
+    id: participant.participantId,
+    teamName: participant.teamName || `Spieler ${participant.participantId}`,
+    username: participant.username || "",
+    seed: participant.seed ?? null,
+    active: participant.active ?? false,
+    checkin: participant.checkin ?? false,
+    paid: participant.paid ?? false,
+    note: participant.note || "",
+  }));
+
+  const participantsMap = participantDetails.reduce((accumulator, participant) => {
+    accumulator[participant.id] = participant.teamName;
+    return accumulator;
+  }, {});
+
+  return { state, participantDetails, participantsMap };
+}
+
+async function loadParticipants(tournamentId, forceReload = false) {
+  const tId = tournamentId || process.env.TOURNAMENT_ID;
+  if (participantsCacheLoaded[tId] && !forceReload) {
+    return participantsCache[tId] || {};
+  }
+
+  const participantsRes = await apiClient.get(`/tournaments/${tId}/participants.json`);
+  const participants = {};
+  const participantDetails = [];
+  const store = await readParticipantsStore();
+  const storedState = store.tournaments?.[tId] || createEmptyParticipantState(tId);
+
+  participantsRes.data.data?.forEach((participant) => {
+    const displayName = participant.attributes?.name?.replace(" (invitation pending)", "") || `Spieler ${participant.id}`;
+    const storedParticipant = storedState.participants?.[participant.id] || {};
+    const teamName = storedParticipant.teamName || displayName;
+    const checkin = storedParticipant.checkin ?? false;
+    const paid = storedParticipant.paid ?? false;
+    const note = storedParticipant.note || "";
+
+    participants[participant.id] = teamName;
+    participantDetails.push({
+      id: participant.id,
+      teamName,
+      username: participant.attributes?.username || "",
+      seed: participant.attributes?.seed ?? null,
+      active: participant.attributes?.states?.active ?? false,
+      checkin,
+      paid,
+      note,
+    });
+  });
+
+  participantsCache[tId] = participants;
+  participantsDetailsCache[tId] = participantDetails;
+  participantsCacheLoaded[tId] = true;
+
+  const nextState = {
+    tournamentId: tId,
+    updatedAt: new Date().toISOString(),
+    displayMode: storedState.displayMode || "matches",
+    participants: participantDetails.reduce((accumulator, participant) => {
+      accumulator[participant.id] = {
+        participantId: participant.id,
+        teamName: participant.teamName,
+        username: participant.username,
+        seed: participant.seed,
+        active: participant.active,
+        checkin: participant.checkin,
+        paid: participant.paid,
+        note: participant.note,
+      };
+      return accumulator;
+    }, {}),
+  };
+
+  store.tournaments[tId] = nextState;
+  await writeParticipantsStore(store);
+  return participants;
+}
+
+function clearParticipantsCache(tournamentId) {
+  const tId = tournamentId || process.env.TOURNAMENT_ID;
+  delete participantsCache[tId];
+  delete participantsDetailsCache[tId];
+  delete participantsCacheLoaded[tId];
+}
+
+async function refetchParticipants(tournamentId) {
+  const tId = tournamentId || process.env.TOURNAMENT_ID;
+  clearParticipantsCache(tId);
+  return loadParticipants(tId, true);
+}
+
+function isAdminAuthenticated(req) {
+  const authHeader = req.headers.authorization || "";
+  if (!authHeader.startsWith("Basic ")) return false;
+  const encodedCredentials = authHeader.slice(6);
+  const decodedCredentials = Buffer.from(encodedCredentials, "base64").toString("utf8").split(":");
+  const [username, password] = decodedCredentials;
+  return username === ADMIN_USERNAME && password === ADMIN_PASSWORD;
+}
+
+function requireAdminAuth(req, res, next) {
+  if (isAdminAuthenticated(req)) return next();
+  res.setHeader("WWW-Authenticate", 'Basic realm="Admin"');
+  return res.status(401).send("Authentication required.");
+}
+
+async function getTournamentState(tournamentId) {
+  const store = await readParticipantsStore();
+  return store.tournaments?.[tournamentId] || createEmptyParticipantState(tournamentId);
+}
+
+function buildMatchData(match, stations, participants, fallbackRelationships = {}) {
+  const relationships = match.relationships || {};
+  const mergedRelationships = { ...fallbackRelationships, ...relationships };
+  const timestamps = match.attributes?.timestamps || {};
+  const participantEntries = match.attributes?.points_by_participant || [];
+  const player1Id = mergedRelationships.player1?.data?.id || participantEntries[0]?.participant_id;
+  const player2Id = mergedRelationships.player2?.data?.id || participantEntries[1]?.participant_id;
+  const stationId = mergedRelationships.station?.data?.id;
+
+  return {
+    id: match.id,
+    station: stations[stationId]?.name || "Tisch ?",
+    player1: participants[player1Id] || `Spieler ${player1Id || "?"}`,
+    player2: participants[player2Id] || `Spieler ${player2Id || "?"}`,
+    underwayAt: getTimestampValue(timestamps, "underwayAt", "underway_at"),
+    startedAt: getTimestampValue(timestamps, "startedAt", "started_at"),
+    state: match.attributes?.state,
+    suggestedPlayOrder:
+      match.attributes?.suggestedPlayOrder ??
+      match.attributes?.suggested_play_order ??
+      Number.MAX_SAFE_INTEGER,
+  };
+}
+
 async function updateMatches(tournamentId) {
   const tId = tournamentId || process.env.TOURNAMENT_ID;
   try {
     log(`[API CALL] Fetching data for tournament ID: ${tId}`);
-    const matchesRes = await apiClient.get(
-      `/tournaments/${tId}/matches.json`
-    );
-    const stationsRes = await apiClient.get(
-      `/tournaments/${tId}/stations.json`
-    );
-    const participants = {};
-    matchesRes.data.included?.forEach((item) => {
-      if (item.type === "participant") {
-        participants[item.id] =
-          item.attributes?.name?.replace(" (invitation pending)", "") ||
-          `Spieler ${item.id}`;
-      }
-    });
+    const matchesRes = await apiClient.get(`/tournaments/${tId}/matches.json`);
+    const stationsRes = await apiClient.get(`/tournaments/${tId}/stations.json`);
+
+    // We must load participants if they are not cached.
+    let { participantsMap } = await getParticipantsFromStore(tId);
+    if (Object.keys(participantsMap).length === 0) {
+      await loadParticipants(tId);
+      const refresh = await getParticipantsFromStore(tId);
+      participantsMap = refresh.participantsMap;
+    }
 
     const stations = {};
+    const stationByMatchId = {};
     stationsRes.data.data.forEach((station) => {
-      stations[station.id] = station.attributes?.name || `Tisch ${station.id}`;
-    });
-
-    // Reset data
-    const newData = { active: [], pending: [] };
-
-    matchesRes.data.data.forEach((match) => {
-      const matchData = {
-        id: match.id,
-        station: stations[match.relationships?.station?.data?.id] || "Tisch ?",
-        player1: participants[match.relationships?.player1?.data?.id] || "?",
-        player2: participants[match.relationships?.player2?.data?.id] || "?",
-        underwayAt: match.attributes?.timestamps?.underwayAt,
-        startedAt: match.attributes?.timestamps?.startedAt,
-        state: match.attributes?.state,
-        suggestedPlayOrder: match.attributes?.suggestedPlayOrder,
+      stations[station.id] = {
+        name: station.attributes?.name || `Tisch ${station.id}`,
+        matchId: station.attributes?.match_id || null,
       };
-
-      if (match.attributes?.state === "open") {
-        newData.active.push(matchData);
-      } else if (match.attributes?.state === "pending") {
-        newData.pending.push(matchData);
+      if (station.attributes?.match_id) {
+        stationByMatchId[station.attributes.match_id] = station.id;
       }
     });
 
-    // Sortierung
-    newData.active.sort(
-      (a, b) => getTableNumber(a.station) - getTableNumber(b.station)
-    );
-    newData.pending.sort(
-      (a, b) => a.suggestedPlayOrder - b.suggestedPlayOrder
-    );
+    const newData = { active: [], pending: [] };
+    const allMatches = [...(matchesRes.data?.data || [])];
+
+    if (stationsRes.data?.included) {
+      stationsRes.data.included.forEach(inc => {
+        if (inc.type === "match" && !allMatches.some(m => m.id === inc.id)) {
+          allMatches.push(inc);
+        }
+      });
+    }
+
+    allMatches.forEach((match) => {
+      const stationId = stationByMatchId[match.id];
+      if (stationId) {
+        const fallbackRelationships = {
+          station: { data: { id: stationId, type: "station" } },
+        };
+        newData.active.push(buildMatchData(match, stations, participantsMap, fallbackRelationships));
+      } else if (match.attributes?.state === "pending") {
+        newData.pending.push(buildMatchData(match, stations, participantsMap, match.relationships));
+      }
+    });
+
+    newData.active.sort((a, b) => getTableNumber(a.station) - getTableNumber(b.station));
+    newData.pending.sort((a, b) => a.suggestedPlayOrder - b.suggestedPlayOrder);
 
     matchesCache[tId] = newData;
     cacheTimestamps[tId] = Date.now();
@@ -113,14 +380,9 @@ async function updateMatches(tournamentId) {
   }
 }
 
-// Holt Daten aus Cache oder aktualisiert sie, falls älter als CACHE_INTERVAL
 async function getMatchesData(tId) {
   const now = Date.now();
-  if (
-    !matchesCache[tId] ||
-    !cacheTimestamps[tId] ||
-    now - cacheTimestamps[tId] > CACHE_INTERVAL
-  ) {
+  if (!matchesCache[tId] || !cacheTimestamps[tId] || now - cacheTimestamps[tId] > CACHE_INTERVAL) {
     await updateMatches(tId);
     log(`[CACHE MISS] Updated cache for tournament ID: ${tId}`);
   } else {
@@ -129,457 +391,118 @@ async function getMatchesData(tId) {
   return matchesCache[tId] || { active: [], pending: [] };
 }
 
-// htmlTemplate bekommt jetzt auch tournamentName
-const htmlTemplate = (matchesData, tournamentName) => `
-<!DOCTYPE html>
-<html>
-<head>
-  <title>${tournamentName}</title>
-  <meta http-equiv="refresh" content="15">
-  <style>
-    body {
-      font-family: "Tahoma", sans-serif;
-      background: 
-        linear-gradient(rgba(245, 245, 245, 0.3), rgba(245, 245, 245, 0.3)),
-        url('/bg.png') center/cover no-repeat fixed;
-      letter-spacing: 0.08em;
-      margin: 0;
-      padding: 20px;
-    }
-    .header {
-      background: none;
-      color: white;
-      text-align: center;
-      padding: 1px;
-      margin-bottom: 20px;
-      border-radius: 5px;
-    }
-    .header h1 {
-      font-size: 2.5em;
-    }
-    .section {
-      background:rgba(255, 255, 255, 0.7);
-      border-radius: 5px;
-      padding: 20px;
-      margin-bottom: 20px;
-      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-    }
-    .section-title {
-      color: #2c3e50;
-      margin-top: 0;
-      padding-bottom: 10px;
-      border-bottom: 1px solid #eee;
-      font-size: 1em;
-    }
-    .matches-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 15px;
-      margin-top: 15px;
-    }
-    .match-card {
-      background:rgba(255, 255, 255, 0.6);
-      border-radius: 5px;
-      padding: 15px;
-      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.26);
-      border-left: 6px solid;
-    }
-    .started {
-      border-color:rgb(38, 165, 91);
-    }
-    .assigned {
-      border-color:#e77b3c;
-    }
-    .station {
-      font-weight: bold;
-      color: #2c3e50;
-      margin-bottom: 20px;
-      font-size: 1.4em;
-      border-bottom: 1px solid #eee;
-    }
-    .players {
-      font-size: 1.8em;
-      margin: 5px 0;
-    }
-    .vs {
-      color: #7f8c8d;
-      margin: 5px 0;
-      font-style: italic;
-    }
-    .vs2 {
-      color: #7f8c8d;
-      margin: 5px 0;
-      font-style: italic;
-      font-size: 0.6em;
-    }
-    .status {
-      font-size: 0.7em;
-      margin-top: 10px;
-      padding: 5px;
-      border-radius: 3px;
-      color: white;
-      display: inline-block;
-      float: right;
-    }
-    .status-started {
-      background: rgb(38, 165, 91);
-    }
-    .status-assigned {
-      background: #e77b3c;
-    }
-    .timestamp {
-     float: right;
-      font-size: 0.8em;
-      color: #95a5a6;
-      margin-top: 5px;
-    }
-    .pending-matches {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-      gap: 10px;
-      margin-top: 15px;
-    }
-    .pending-card {
-      background:rgba(255, 255, 255, 0.6);
-      border-radius: 5px;
-      padding: 15px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-      border-left: 4px solid rgb(46, 143, 204);
-      font-size: 1.1em;
-    }
-    .footer {
-      margin-left: auto;
-      margin-right: auto;
-      margin-top: 20px;
-      color:rgb(54, 54, 54);
-      font-size: 0.9em;
-      background-color:rgba(245, 245, 245, 0.69);
-      border-radius: 5px;
-      padding: 10px;
-      width: fit-content;
-    }
-    @media (max-width: 900px) {
-      .matches-grid {
-        grid-template-columns: repeat(2, 1fr);
-      }
-    }
-    @media (max-width: 600px) {
-      .matches-grid {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    
-    
-    :root {
-      --bg-dark: #121212;
-      --card-dark:rgba(30, 30, 30, 0.48);
-      --text-dark: #e0e0e0;
-      --accent-dark:rgb(205, 197, 253);
-      --accent-secondary: #e77b3c;
-      --border-dark: #333;
-    }
-
-    body.dark-mode {
-      background: var(--bg-dark);
-      color: var(--text-dark);
-        background: 
-    linear-gradient(rgba(18, 18, 18, 0.85), rgba(18, 18, 18, 0.85)),
-    url('/bg.png') center/cover no-repeat fixed !important;
-    }
-
-    .dark-mode .header {
-      background: none;
-      color: white;
-    }
-
-    .dark-mode .section {
-      background: var(--card-dark);
-      box-shadow: 0 4px 8px rgba(0,0,0,0.3);
-      border: 1px solid var(--border-dark);
-    }
-
-    .dark-mode .section-title {
-      color: var(--accent-dark);
-      border-bottom: 1px solid var(--border-dark);
-    }
-
-    .dark-mode .match-card {
-      background: #252525;
-      box-shadow: 0 3px 6px rgba(0,0,0,0.3);
-      border-left: 6px solid;
-    }
-
-    .dark-mode  .started {
-      border-color:rgb(25, 105, 58);
-    }
-    .dark-mode .assigned {
-      border-color:rgb(145, 67, 23);
-    }
-
-    .dark-mode .status-started {
-      background: rgb(25, 105, 58);
-    }
-    .dark-mode .status-assigned {
-      background: rgb(145, 67, 23);
-    }
-
-    .dark-mode .station {
-      color: var(--accent-dark);
-      border-bottom: 1px solid var(--border-dark);
-    }
-
-    .dark-mode .players {
-      color: var(--text-dark);
-    }
-
-    .dark-mode .vs {
-      color: #aaa;
-    }
-
-    .dark-mode .pending-card {
-      background: #252525;
-      border-left: 4px solid rgb(46, 143, 204);
-    }
-
-    .dark-mode .footer {
-      color: #aaa;
-    }
-
-      .dark-mode .footer {
-      margin-left: auto;
-      margin-right: auto;
-      margin-top: 20px;
-      color:var(--text-dark);
-      font-size: 0.9em;
-      background: var(--card-dark);
-      border-radius: 5px;
-      padding: 10px;
-      width: fit-content;
-    }
-
-    /* Toggle Button */
-.theme-toggle {
-  position: fixed;
-  bottom: 20px;
-  right: 20px;
-  background: var(--card-dark);
-  color: white;
-  border: none;
-  border-radius: 50%;
-  width: 50px;
-  height: 50px;
-  font-size: 1.5em;
-  cursor: pointer;
-  box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-  z-index: 1000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0;
-  transition: opacity 0.3s ease;
-}
-
-body:hover .theme-toggle,
-.theme-toggle:focus {
-  opacity: 1;
-}
-
-body:not(.dark-mode) .theme-toggle {
-  background: #2c3e50;
-}
-</style>
-
-<script>
-    // Dark Mode Toggle
-    document.addEventListener('DOMContentLoaded', () => {
-      const toggleBtn = document.createElement('button');
-      toggleBtn.className = 'theme-toggle';
-      toggleBtn.innerHTML = '🌓';
-      toggleBtn.title = 'Dark/Light Mode wechseln (Taste: T)';
-      toggleBtn.setAttribute('aria-label', 'Theme wechseln');
-      toggleBtn.tabIndex = 0; // Macht den Button fokussierbar
-      document.body.appendChild(toggleBtn);
-
-      // Mouseover für den ganzen rechten Bereich
-      const rightEdge = document.createElement('div');
-      rightEdge.style.position = 'fixed';
-      rightEdge.style.right = '0';
-      rightEdge.style.top = '0';
-      rightEdge.style.width = '50px';
-      rightEdge.style.height = '100vh';
-      rightEdge.style.zIndex = '999';
-      document.body.appendChild(rightEdge);
-
-      let showTimeout;
-      rightEdge.addEventListener('mouseenter', () => {
-        clearTimeout(showTimeout);
-        toggleBtn.style.opacity = '1';
-      });
-
-      rightEdge.addEventListener('mouseleave', () => {
-        // Nur ausblenden wenn nicht fokussiert
-        if (!toggleBtn.matches(':focus')) {
-          showTimeout = setTimeout(() => {
-            toggleBtn.style.opacity = '0';
-          }, 1000);
-        }
-      });
-
-      // Toggle-Funktion
-      const toggleTheme = () => {
-        document.body.classList.toggle('dark-mode');
-        localStorage.setItem('darkMode', document.body.classList.contains('dark-mode'));
-      };
-
-      // Klick-Event
-      toggleBtn.addEventListener('click', toggleTheme);
-
-      // Tastatur-Event
-      document.addEventListener('keydown', (e) => {
-        if (e.key.toLowerCase() === 't') {
-          toggleTheme();
-          // Button kurz anzeigen bei Tastendruck
-          toggleBtn.style.opacity = '1';
-          setTimeout(() => {
-            if (!toggleBtn.matches(':hover, :focus')) {
-              toggleBtn.style.opacity = '0';
-            }
-          }, 2000);
-        }
-      });
-
-      // Beim Laden prüfen
-      if (localStorage.getItem('darkMode') === 'true') {
-        document.body.classList.add('dark-mode');
-      }
-    });
-</script>
-</head>
-<body>
-<!-----   
-<div class="header">
-     <h1>${process.env.TOURNAMENT_NAME}</h1>
-   </div>
------>
-  <div class="section">
-    <h2 class="section-title">Aktuelle Spiele</h2>
-    <div class="matches-grid">
-      ${matchesData.active
-        .map(
-          (match) => `
-        <div class="match-card ${match.underwayAt ? "started" : "assigned"}">
-            <div class="station">${match.station}
-                      <div class="status ${
-                        match.underwayAt ? "status-started" : "status-assigned"
-                      }">
-              ${match.underwayAt ? "Spiel läuft" : "warten auf Spieler"}
-            </div>
-          </div>
-          <div class="players">${match.player1}</div>
-          <div class="vs">vs</div>
-          <div class="players">${match.player2}</div>
-
-          <div class="timestamp">seit ${
-            match.underwayAt
-              ? new Date(match.underwayAt).toLocaleTimeString()
-              : new Date(match.startedAt).toLocaleTimeString()
-          }</div>
-        </div>
-      `
-        )
-        .join("")}
-    </div>
-  </div>
-
-  ${
-    matchesData.pending.length > 0
-      ? `
-    <div class="section">
-      <h2 class="section-title">Nächste Spiele (${
-        matchesData.pending.length
-      })</h2>
-      <div class="pending-matches">
-        ${matchesData.pending
-          .map(
-            (match) => `
-          <div class="pending-card">
-            <div>${match.player1} <div class="vs2">vs</div> ${match.player2}</div>
-          </div>
-        `
-          )
-          .join("")}
-      </div>
-    </div>
-  `
-      : ""
-  }
-
-  <div class="footer">
-    Letzte Aktualisierung: ${new Date().toLocaleTimeString()}
-  </div>
-</body>
-</html>
-`;
-
 app.get("/", async (req, res) => {
-  const tId = req.query.tId || "";
-  const tournamentName = process.env.TOURNAMENT_NAME;
+  const configuredTournamentId = process.env.TOURNAMENT_ID;
+  if (!configuredTournamentId) {
+    return res.status(500).send("TOURNAMENT_ID ist nicht in der .env gesetzt.");
+  }
+  const state = await getTournamentState(configuredTournamentId);
+  if ((state?.displayMode || "matches") === "participants") {
+    const { participantDetails } = await getParticipantsFromStore(configuredTournamentId);
+    return res.render("participants", {
+      participants: participantDetails,
+      tournamentName: process.env.TOURNAMENT_NAME,
+      webRefreshInterval: WEB_REFRESH_INTERVAL
+    });
+  }
+  const data = await getMatchesData(configuredTournamentId);
+  log(`[PAGE LOAD] Served data for tournament ID: ${configuredTournamentId}`);
+  return res.render("index", {
+    matchesData: data,
+    tournamentName: process.env.TOURNAMENT_NAME,
+    webRefreshInterval: WEB_REFRESH_INTERVAL
+  });
+});
 
-  if (!tId) {
-    // Zeige Eingabefeld für Turnier-ID
-    return res.send(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Turnier auswählen</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <style>
-              body {
-      font-family: "Tahoma", sans-serif;
-      background: 
-        linear-gradient(rgba(245, 245, 245, 0.3), rgba(245, 245, 245, 0.3)),
-        url('/bg.png') center/cover no-repeat fixed;
-      letter-spacing: 0.08em;
-display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0;
+app.get("/admin", requireAdminAuth, async (req, res) => {
+  const configuredTournamentId = process.env.TOURNAMENT_ID;
+  if (!configuredTournamentId) {
+    return res.status(500).send("TOURNAMENT_ID ist nicht in der .env gesetzt.");
+  }
+  const { state, participantDetails } = await getParticipantsFromStore(configuredTournamentId);
+  return res.render("admin", {
+    participantCount: participantDetails.length,
+    refetchedAt: null,
+    message: "",
+    participants: participantDetails,
+    displayMode: state?.displayMode || "matches",
+  });
+});
+
+app.post("/admin/save-participants", requireAdminAuth, async (req, res) => {
+  const configuredTournamentId = process.env.TOURNAMENT_ID;
+  if (!configuredTournamentId) {
+    return res.status(500).send("TOURNAMENT_ID ist nicht in der .env gesetzt.");
+  }
+  const store = await readParticipantsStore();
+  const state = store.tournaments?.[configuredTournamentId] || createEmptyParticipantState(configuredTournamentId);
+  const body = req.body || {};
+  state.displayMode = body.displayMode || state.displayMode || "matches";
+
+  const { participantDetails } = await getParticipantsFromStore(configuredTournamentId);
+
+  participantDetails.forEach((participant) => {
+    const checkinChecked = body[`checkin_${participant.id}`] !== undefined;
+    const paidChecked = body[`paid_${participant.id}`] !== undefined;
+    const noteValue = body[`note_${participant.id}`] !== undefined ? body[`note_${participant.id}`] : (participant.note || "");
+
+    state.participants[participant.id] = {
+      participantId: participant.id,
+      teamName: participant.teamName,
+      username: participant.username,
+      seed: participant.seed,
+      active: participant.active,
+      checkin: checkinChecked,
+      paid: paidChecked,
+      note: noteValue,
+    };
+  });
+
+  state.tournamentId = configuredTournamentId;
+  state.updatedAt = new Date().toISOString();
+  store.tournaments[configuredTournamentId] = state;
+  await writeParticipantsStore(store);
+  clearParticipantsCache(configuredTournamentId);
+
+  const refreshed = await getParticipantsFromStore(configuredTournamentId);
+  return res.render("admin", {
+    participantCount: refreshed.participantDetails.length,
+    refetchedAt: new Date().toLocaleTimeString(),
+    message: "Status gespeichert.",
+    participants: refreshed.participantDetails,
+    displayMode: state?.displayMode || "matches",
+  });
+});
+
+app.post("/admin/refetch-participants", requireAdminAuth, async (req, res) => {
+  const configuredTournamentId = process.env.TOURNAMENT_ID;
+  if (!configuredTournamentId) {
+    return res.status(500).json({ error: "TOURNAMENT_ID ist nicht in der .env gesetzt." });
+  }
+  try {
+    const participants = await refetchParticipants(configuredTournamentId);
+    return res.json({ success: true, count: Object.keys(participants).length });
+  } catch (error) {
+    return res.status(500).json({ error: `Refetch fehlgeschlagen: ${error.message}` });
+  }
+});
+
+async function bootstrap() {
+  try {
+    const configuredTournamentId = process.env.TOURNAMENT_ID;
+    const state = await getTournamentState(configuredTournamentId);
+    console.log(`[INITIAL] Loaded local participant store for tournament ID: ${configuredTournamentId}`);
+    if ((state?.displayMode || "matches") === "participants") {
+      console.log(`[INITIAL] Participant mode active; using local JSON store for tournament ID: ${configuredTournamentId}`);
     }
-          .input-container { background: white; padding: 30px 40px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
-          h1 { margin-bottom: 20px; }
-          input[type="text"] { padding: 10px; font-size: 1.1em; border: 1px solid #ccc; border-radius: 4px; width: 220px; }
-          button { padding: 10px 20px; font-size: 1.1em; border: none; border-radius: 4px; background: #2c3e50; color: white; margin-left: 10px; cursor: pointer; }
-          button:hover { background: #1a232c; }
-        </style>
-      </head>
-      <body>
-        <div class="input-container">
-          <h1>Turnier-ID eingeben</h1>
-          <form id="tournamentForm" autocomplete="off">
-            <input type="text" id="tIdInput" name="tId" placeholder="Turnier-ID" required autofocus>
-            <button type="submit">Anzeigen</button>
-          </form>
-        </div>
-        <script>
-          document.getElementById('tournamentForm').addEventListener('submit', function(e) {
-            e.preventDefault();
-            const tId = document.getElementById('tIdInput').value.trim();
-            if (tId) {
-              window.location.href = '/?tId=' + encodeURIComponent(tId);
-            }
-          });
-        </script>
-      </body>
-      </html>
-    `);
+  } catch (error) {
+    console.error(`[INITIAL] Participant preload failed: ${error.message}`);
   }
 
-  const data = await getMatchesData(tId);
-  log(`[PAGE LOAD] Served data for tournament ID: ${tId}`);
-  res.send(htmlTemplate(data, tournamentName));
-});
+  app.listen(PORT, () => {
+    console.log(`[INITIAL] Server running on http://localhost:${PORT}`);
+    console.log(`[INITIAL] Title: ${process.env.TOURNAMENT_NAME}`);
+  });
+}
 
-app.listen(PORT, () => {
-  console.log(`[INITIAL] Server running on http://localhost:${PORT}`);
-  console.log(`[INITIAL] Title: ${process.env.TOURNAMENT_NAME}`);
-});
-
-app.use(express.static(path.join(__dirname, "public")));
+bootstrap();

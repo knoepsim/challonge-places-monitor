@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>Admin - Monitor</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/theme.js"></script>
+</head>
+
+<body id="admin-body">
+  <div class="panel">
+    <div class="admin-header-row">
+      <div class="header-left">
+        <h1>Admin Dashboard</h1>
+        <div class="stats">Teams im System: <strong><%= participantCount %></strong></div>
+      </div>
+      <form method="post" action="/admin/refetch-participants" class="refetch-form">
+        <button type="submit" class="btn-refetch">🔄 Neu aus Challonge laden</button>
+      </form>
+    </div>
+    
+    <form method="post" action="/admin/save-participants">
+      <div class="admin-controls-bar">
+        <div class="segment-wrapper">
+          <span class="segment-label">Monitor zeigt an:</span>
+          <div class="segment-group">
+            <label class="segment-btn">
+              <input type="radio" name="displayMode" value="matches" <%= displayMode === "matches" ? "checked" : "" %>>
+              <span>Tische (Aktuelle Spiele)</span>
+            </label>
+            <label class="segment-btn">
+              <input type="radio" name="displayMode" value="participants" <%= displayMode === "participants" ? "checked" : "" %>>
+              <span>Teams (Check-in Status)</span>
+            </label>
+          </div>
+        </div>
+        <div class="autosave" id="autosaveState">Speichert automatisch...</div>
+      </div>
+      <div class="admin-grid">
+        <% participants.forEach(function(participant) { %>
+          <div class="admin-card">
+            <div class="ac-header">
+              <div class="ac-title">
+                <%= participant.teamName %>
+                <% if (participant.note) { %>
+                  <div class="team-note"><%= participant.note %></div>
+                <% } %>
+                <input type="hidden" name="note_<%= participant.id %>" id="noteInput_<%= participant.id %>" value="<%= participant.note || '' %>">
+              </div>
+              <button type="button" class="btn-edit-note" data-id="<%= participant.id %>" data-team="<%= participant.teamName %>">✏️</button>
+            </div>
+            <div class="ac-toggles">
+              <label class="touch-toggle">
+                <input type="checkbox" name="checkin_<%= participant.id %>" <%=participant.checkin ? "checked" : "" %>>
+                <span class="toggle-btn">Check-in</span>
+              </label>
+              <label class="touch-toggle">
+                <input type="checkbox" name="paid_<%= participant.id %>" <%=participant.paid ? "checked" : "" %>>
+                <span class="toggle-btn">Bezahlt</span>
+              </label>
+            </div>
+          </div>
+        <% }); %>
+      </div>
+
+    </form>
+    <% if (message) { %>
+      <div class="message">
+        <%= message %>
+      </div>
+      <% } %>
+        <% if (refetchedAt) { %>
+          <div class="refetched">Letzter Refetch: <%= refetchedAt %>
+          </div>
+          <% } %>
+            <div class="link"><a href="/">Zu Anzeige</a></div>
+  </div>
+  <script>
+    const form = document.querySelector('form[action="/admin/save-participants"]');
+    const statusNode = document.getElementById('autosaveState');
+    let saveTimer;
+
+    async function saveNow() {
+      const payload = new URLSearchParams(new FormData(form));
+      const response = await fetch('/admin/save-participants', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'
+        },
+        body: payload,
+        credentials: 'same-origin'
+      });
+
+      if (!response.ok) {
+        throw new Error('Speichern fehlgeschlagen');
+      }
+
+      statusNode.textContent = 'Gespeichert ' + new Date().toLocaleTimeString();
+    }
+
+    form.querySelectorAll('input[type="checkbox"]').forEach((checkbox) => {
+      checkbox.addEventListener('change', (e) => {
+        statusNode.textContent = 'Speichere...';
+        window.clearTimeout(saveTimer);
+        saveTimer = window.setTimeout(() => {
+          saveNow().catch(() => {
+            statusNode.textContent = 'Speichern fehlgeschlagen';
+            alert('Speichern fehlgeschlagen! Bitte überprüfe deine Verbindung.');
+            // Aktion rückgängig machen
+            e.target.checked = !e.target.checked;
+          });
+        }, 100);
+      });
+    });
+
+    let prevDisplayMode = document.querySelector('input[name="displayMode"]:checked')?.value;
+    document.querySelectorAll('input[name="displayMode"]').forEach((radio) => {
+      radio.addEventListener('change', (e) => {
+        statusNode.textContent = 'Speichere Modus...';
+        window.clearTimeout(saveTimer);
+        saveTimer = window.setTimeout(() => {
+          saveNow().then(() => {
+            prevDisplayMode = e.target.value;
+          }).catch(() => {
+            statusNode.textContent = 'Speichern fehlgeschlagen';
+            alert('Speichern fehlgeschlagen!');
+            // Aktion rückgängig machen
+            if (prevDisplayMode) {
+              const oldRadio = document.querySelector(`input[name="displayMode"][value="${prevDisplayMode}"]`);
+              if (oldRadio) oldRadio.checked = true;
+            }
+          });
+        }, 100);
+      });
+    });
+
+    document.querySelectorAll('.btn-edit-note').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const id = e.target.getAttribute('data-id');
+        const team = e.target.getAttribute('data-team');
+        const input = document.getElementById('noteInput_' + id);
+        const currentNote = input.value;
+        const newNote = prompt('Notiz für ' + team + ':', currentNote);
+        if (newNote !== null) {
+          input.value = newNote;
+          
+          // Optisch updaten
+          let container = e.target.closest('.ac-header').querySelector('.ac-title');
+          let noteDiv = container.querySelector('.team-note');
+          if (!noteDiv && newNote.trim() !== '') {
+            noteDiv = document.createElement('div');
+            noteDiv.className = 'team-note';
+            container.insertBefore(noteDiv, input);
+          }
+          if (noteDiv) {
+            noteDiv.textContent = newNote;
+            if (newNote.trim() === '') noteDiv.remove();
+          }
+
+          // Speichern triggern
+          statusNode.textContent = 'Speichere...';
+          saveNow().catch(() => {
+            alert('Speichern fehlgeschlagen!');
+            // Aktion rückgängig machen
+            input.value = currentNote;
+            if (!currentNote.trim()) {
+              if (noteDiv) noteDiv.remove();
+            } else {
+              if (!noteDiv) {
+                noteDiv = document.createElement('div');
+                noteDiv.className = 'team-note';
+                container.insertBefore(noteDiv, input);
+              }
+              noteDiv.textContent = currentNote;
+            }
+            statusNode.textContent = 'Speichern fehlgeschlagen';
+          });
+        }
+      });
+    });
+
+    const refetchForm = document.querySelector('.refetch-form');
+    if (refetchForm) {
+      refetchForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const btn = refetchForm.querySelector('button');
+        const originalText = btn.textContent;
+        btn.textContent = 'Lade... ⏳';
+        btn.disabled = true;
+        try {
+          const res = await fetch(refetchForm.action, { method: 'POST' });
+          if (!res.ok) throw new Error('Fehler');
+          window.location.reload();
+        } catch (err) {
+          alert('Laden fehlgeschlagen!');
+          btn.textContent = originalText;
+          btn.disabled = false;
+        }
+      });
+    }
+  </script>
+</body>
+
+</html>

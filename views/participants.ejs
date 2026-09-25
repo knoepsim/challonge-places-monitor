@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>
+    <%= tournamentName %>
+  </title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/theme.js"></script>
+</head>
+
+<body id="app-body">
+  <div id="progress-bar"></div>
+  <div id="offline-badge" class="toast-modern" style="display: none;">
+    <div class="pulse-dot"></div>
+    <span>Verbindung unterbrochen. Verbinde neu...</span>
+  </div>
+  <div id="content-wrapper">
+    <div class="section">
+      <h1>Teams (<%= participants.length %>)</h1>
+      <div class="grid">
+        <% participants.forEach(function(participant) { %>
+          <div class="participant-card <%= participant.checkin ? 'complete' : 'missing' %>">
+            <div class="participant-name">
+              <%= participant.teamName %>
+            </div>
+            <!-- <div class="participant-meta">ID <%= participant.id %>
+              <%= participant.seed !==null ? ' · Seed ' + participant.seed : '' %>
+                <%= participant.username ? ' · ' + participant.username : '' %>
+          </div> -->
+            <div class="participant-status">
+              <span class="badge <%= participant.checkin ? 'status-started' : 'status-assigned' %>">
+                <%= participant.checkin ? 'Eingecheckt' : 'Fehlt noch' %>
+              </span>
+            </div>
+          </div>
+          <% }); %>
+      </div>
+    </div>
+  </div> <!-- close content-wrapper -->
+
+  <script>
+    const intervalMs = Number("<%= webRefreshInterval * 1000 %>");
+
+    function startProgress() {
+      const pb = document.getElementById('progress-bar');
+      if (pb) {
+        pb.style.transition = 'none';
+        pb.style.width = '0%';
+        setTimeout(() => {
+          pb.style.transition = `width ${intervalMs}ms linear`;
+          pb.style.width = '100%';
+        }, 50);
+      }
+    }
+    startProgress();
+
+    // AJAX Auto-Refresh without page reload
+    setInterval(async () => {
+      try {
+        const res = await fetch(window.location.href);
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const html = await res.text();
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+
+        const wrapper = document.getElementById('content-wrapper');
+        wrapper.innerHTML = doc.getElementById('content-wrapper').innerHTML;
+        const badge = document.getElementById('offline-badge');
+        if (badge.style.display !== 'none') badge.style.display = 'none';
+        startProgress();
+
+      } catch (e) {
+        console.error("Auto-refresh failed", e);
+        const badge = document.getElementById('offline-badge');
+        if (badge.style.display !== 'flex') badge.style.display = 'flex';
+      }
+    }, intervalMs);
+  </script>
+</body>
+
+</html>
