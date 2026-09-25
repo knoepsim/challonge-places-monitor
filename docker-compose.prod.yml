@@ -1,0 +1,25 @@
+services:
+  app:
+    image: ghcr.io/knoepsim/challonge-places-monitor:latest
+    container_name: challonge-places-monitor
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - PORT=3000
+      - CHALLONGE_API_KEY=
+      - TOURNAMENT_ID=
+      - TOURNAMENT_NAME=
+      - ADMIN_USERNAME=
+      - ADMIN_PASSWORD=
+      - LOG_ENABLED=false
+
+  watchtower:
+    image: containrrr/watchtower
+    container_name: challonge-watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: --interval 60 --cleanup challonge-places-monitor

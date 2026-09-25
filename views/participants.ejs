@@ -16,7 +16,7 @@
     <div class="pulse-dot"></div>
     <span>Verbindung unterbrochen. Verbinde neu...</span>
   </div>
-  <div id="content-wrapper">
+  <div id="content-wrapper" data-view="participants">
     <div class="section">
       <h1>Teams (<%= participants.length %>)</h1>
       <div class="grid">
@@ -66,7 +66,14 @@
         const doc = parser.parseFromString(html, 'text/html');
 
         const wrapper = document.getElementById('content-wrapper');
-        wrapper.innerHTML = doc.getElementById('content-wrapper').innerHTML;
+        const newWrapper = doc.getElementById('content-wrapper');
+        
+        if (wrapper.getAttribute('data-view') !== newWrapper.getAttribute('data-view')) {
+          window.location.reload();
+          return;
+        }
+        
+        wrapper.innerHTML = newWrapper.innerHTML;
         const badge = document.getElementById('offline-badge');
         if (badge.style.display !== 'none') badge.style.display = 'none';
         startProgress();

@@ -21,29 +21,29 @@
 
     <div class="admin-controls-bar" style="margin-bottom: 20px; align-items: flex-end;">
       <form method="post" action="/admin/save-config" class="settings-form"
-        style="flex: 1; margin: 0; min-width: 300px;">
-        <div style="display: flex; gap: 20px; flex-wrap: wrap;">
-          <div style="display: flex; flex-direction: column; gap: 8px; flex: 1; min-width: 200px;">
+        style="flex: 1; margin: 0; min-width: 0;">
+        <div style="display: flex; gap: 16px; flex-wrap: wrap;">
+          <div style="display: flex; flex-direction: column; gap: 8px; flex: 1; min-width: min(100%, 200px);">
             <span class="segment-label" style="font-size: 0.9em;">Challonge Turnier ID:</span>
             <input type="text" name="tournamentId" value="<%= activeTournamentId %>" placeholder="z.B. q35a0yvc" class="text-input">
           </div>
-          <div style="display: flex; flex-direction: column; gap: 8px; flex: 1; min-width: 200px;">
+          <div style="display: flex; flex-direction: column; gap: 8px; flex: 1; min-width: min(100%, 200px);">
             <span class="segment-label" style="font-size: 0.9em;">Temp API Key (Laufzeit):</span>
             <div style="display: flex; gap: 10px;">
-              <input type="text" name="overrideApiKey" value="<%= overrideApiKey %>" placeholder="Optional" class="text-input" style="flex: 1;">
-              <button type="submit" class="btn-refetch" style="margin: 0;">Speichern</button>
+              <input type="text" name="overrideApiKey" value="<%= overrideApiKey %>" placeholder="Optional" class="text-input" style="flex: 1; min-width: 0;">
+              <button type="submit" class="btn-refetch" style="margin: 0; padding: 10px 16px;">Speichern</button>
             </div>
           </div>
         </div>
       </form>
 
-      <div style="display: flex; gap: 10px;">
-        <form method="post" action="/admin/refetch-participants" class="refetch-form" style="margin: 0;">
-          <button type="submit" class="btn-refetch" style="margin: 0; background: #64748b;">🔄 Refetch</button>
+      <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px;">
+        <form method="post" action="/admin/refetch-participants" class="refetch-form" style="margin: 0; flex: 1; display: flex;">
+          <button type="submit" class="btn-refetch" style="margin: 0; background: #64748b; flex: 1; padding: 10px 16px;">🔄 Refetch</button>
         </form>
         
         <% if (activeTournamentId) { %>
-        <a href="https://challonge.com/de/<%= activeTournamentId %>/report_scores" target="_blank" rel="noopener noreferrer" style="margin: 0; background: #10b981; color: #fff; text-decoration: none; padding: 10px 16px; border-radius: 8px; font-weight: 800; font-size: 1em; display: flex; align-items: center; justify-content: center; transition: all 0.2s; white-space: nowrap;">
+        <a href="https://challonge.com/de/<%= activeTournamentId %>/report_scores" target="_blank" rel="noopener noreferrer" style="margin: 0; background: #10b981; color: #fff; text-decoration: none; padding: 10px 16px; border-radius: 8px; font-weight: 800; font-size: 1em; display: flex; align-items: center; justify-content: center; flex: 1; white-space: nowrap;">
           📝 Ergebnisse melden
         </a>
         <% } %>
