@@ -533,6 +533,7 @@ app.post("/admin/save-participants", requireAdminAuth, async (req, res) => {
     participants: refreshed.participantDetails,
     displayMode: config.displayMode || "matches",
     activeTournamentId: configuredTournamentId || "",
+    overrideApiKey: overrideApiKey || "",
   });
 });
 
@@ -561,7 +562,7 @@ async function bootstrap() {
     console.error(`[INITIAL] Participant preload failed: ${error.message}`);
   }
 
-  app.listen(PORT, () => {
+  const server = app.listen(PORT, () => {
     console.log(`[INITIAL] Server running on http://localhost:${PORT}`);
     console.log(`[INITIAL] Title: ${process.env.TOURNAMENT_NAME}`);
   });
