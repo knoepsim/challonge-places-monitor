@@ -41,20 +41,6 @@ document.addEventListener('DOMContentLoaded', () => {
   // Klick-Event
   toggleBtn.addEventListener('click', toggleTheme);
 
-  // Tastatur-Event
-  document.addEventListener('keydown', (e) => {
-    if (e.key.toLowerCase() === 't') {
-      toggleTheme();
-      // Button kurz anzeigen bei Tastendruck
-      toggleBtn.style.opacity = '1';
-      setTimeout(() => {
-        if (!toggleBtn.matches(':hover, :focus')) {
-          toggleBtn.style.opacity = '0';
-        }
-      }, 2000);
-    }
-  });
-
   // Beim Laden prüfen
   if (localStorage.getItem('darkMode') === 'true') {
     document.body.classList.add('dark-mode');

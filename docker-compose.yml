@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    image: challonge-places-monitor:latest
+    container_name: challonge-places-monitor
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - CHALLONGE_API_KEY=${CHALLONGE_API_KEY}
+      - TOURNAMENT_ID=${TOURNAMENT_ID}
+      - TOURNAMENT_NAME=${TOURNAMENT_NAME}
+      - PORT=${PORT:-3000}
+      - API_CACHE_INTERVAL=${API_CACHE_INTERVAL:-60000}
+      - WEB_REFRESH_INTERVAL=${WEB_REFRESH_INTERVAL:-15}
+      - LOG_ENABLED=${LOG_ENABLED:-true}
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-pw1234}
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+    command: --label-enable --interval 600

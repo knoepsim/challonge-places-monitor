@@ -179,13 +179,23 @@ body.dark-mode {
 }
 
 /* Dark Mode Overrides (Common) */
+.dark-mode .section {
+  background: var(--card-dark);
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.8);
+}
 
+.dark-mode .section h1,
+.dark-mode .section-title {
+  border-bottom-color: var(--border-dark);
+  color: var(--text-dark);
+}
 
-
-
-
-
-/* -------------------------------------
+.dark-mode .footer {
+  background: var(--card-dark);
+  border-color: var(--border-dark);
+  color: var(--text-dark);
+}/* -------------------------------------
  *  Matches Page (index.ejs)
  * ------------------------------------- */
 .header {
@@ -517,6 +527,25 @@ body.dark-mode {
   flex-wrap: wrap;
 }
 
+.text-input {
+  font-family: inherit;
+  font-size: 1.1em;
+  padding: 10px 14px;
+  border: 2px solid #cbd5e1;
+  background: #fff;
+  color: #333;
+  border-radius: 8px;
+  outline: none;
+  transition: border-color 0.2s;
+  min-width: 0;
+  height: 48px; /* match buttons which are 48px typically: 12px pad * 2 + ~20px font + 4px border */
+  box-sizing: border-box;
+}
+
+.text-input:focus {
+  border-color: var(--color-blue);
+}
+
 .segment-label {
   font-weight: 800;
   color: #333;
@@ -549,8 +578,13 @@ body.dark-mode {
 
 .segment-btn input:checked+span {
   background: var(--segment-btn-active-bg);
-  color: #111;
+  color: var(--segment-btn-active-text, #111);
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.dark-mode .segment-btn input:checked+span {
+  background: #444;
+  color: #fff;
 }
 
 /* Touch-Friendly Admin Grid */
@@ -741,19 +775,37 @@ button:hover {
 }
 
 /* Admin Dark Mode Support */
+.dark-mode .panel {
+  background: var(--card-dark);
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.8);
+}
 
+.dark-mode .admin-card {
+  background: #1a1a1a;
+  border-color: #333;
+}
 
+.dark-mode .admin-header-row h1,
+.dark-mode .segment-label,
+.dark-mode .ac-title {
+  color: #fff;
+}
 
+.dark-mode .refetched,
+.dark-mode .autosave,
+.dark-mode .team-note {
+  color: #aaa;
+}
 
+.dark-mode .admin-controls-bar {
+  background: rgba(255, 255, 255, 0.05);
+}
 
-
-
-
-
-
-
-
-
+.dark-mode .touch-toggle .toggle-btn {
+  background: #333;
+  color: #aaa;
+}
 
 .dark-mode .link a {
   color: var(--accent-dark);
@@ -875,4 +927,11 @@ body:hover .theme-toggle,
   100% {
     box-shadow: 0 0 0 0 rgba(255, 255, 255, 0);
   }
+}
+
+:root[data-theme="dark"] .text-input,
+.dark-mode .text-input {
+  background: #1e293b;
+  color: #f1f5f9;
+  border-color: #334155;
 }

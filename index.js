@@ -52,6 +52,8 @@ function formatLogValue(value) {
   return output;
 }
 
+let overrideApiKey = null;
+
 const apiClient = axios.create({
   baseURL: CHALLONGE_API_BASE_URL,
   httpsAgent: new https.Agent({ keepAlive: true }),
@@ -64,6 +66,9 @@ const apiClient = axios.create({
 });
 
 apiClient.interceptors.request.use((config) => {
+  if (overrideApiKey) {
+    config.headers.Authorization = overrideApiKey;
+  }
   if (LOG_ENABLED) {
     config.metadata = { startTime: Date.now() };
     const method = (config.method || "get").toUpperCase();
@@ -129,10 +134,43 @@ function createEmptyParticipantState(tournamentId) {
 }
 
 function createEmptyParticipantsStore() {
-  return { tournaments: {} };
+  return { activeTournamentId: null, tournaments: {} };
+}
+
+const CONFIG_FILE = path.join(__dirname, "data", "config.json");
+
+let inMemoryConfig = null;
+
+async function readConfig() {
+  if (inMemoryConfig) return inMemoryConfig;
+  try {
+    const raw = await fs.readFile(CONFIG_FILE, "utf8");
+    inMemoryConfig = JSON.parse(raw);
+  } catch {
+    inMemoryConfig = { activeTournamentId: null, displayMode: "matches" };
+  }
+  return inMemoryConfig;
+}
+
+async function writeConfig(config) {
+  inMemoryConfig = config;
+  await fs.mkdir(path.dirname(CONFIG_FILE), { recursive: true });
+  await fs.writeFile(CONFIG_FILE, `${JSON.stringify(config, null, 2)}\n`, "utf8");
 }
 
 let inMemoryStore = null;
+
+async function getActiveTournamentId() {
+  const config = await readConfig();
+  if (config.activeTournamentId) return config.activeTournamentId;
+  const store = await readParticipantsStore();
+  if (store.activeTournamentId) {
+    config.activeTournamentId = store.activeTournamentId;
+    await writeConfig(config);
+    return config.activeTournamentId;
+  }
+  return process.env.TOURNAMENT_ID || null;
+}
 
 async function readParticipantsStore() {
   if (inMemoryStore) return inMemoryStore;
@@ -149,11 +187,12 @@ async function readParticipantsStore() {
           participants: tournamentState?.participants || {},
         };
       }
-      inMemoryStore = { tournaments: normalizedTournaments };
+      inMemoryStore = { activeTournamentId: parsed.activeTournamentId || null, tournaments: normalizedTournaments };
       return inMemoryStore;
     }
     if (parsed?.tournamentId && parsed?.participants) {
       inMemoryStore = {
+        activeTournamentId: parsed.tournamentId || null,
         tournaments: {
           [parsed.tournamentId]: {
             tournamentId: parsed.tournamentId,
@@ -203,7 +242,7 @@ async function getParticipantsFromStore(tournamentId) {
 }
 
 async function loadParticipants(tournamentId, forceReload = false) {
-  const tId = tournamentId || process.env.TOURNAMENT_ID;
+  const tId = tournamentId || await getActiveTournamentId();
   if (participantsCacheLoaded[tId] && !forceReload) {
     return participantsCache[tId] || {};
   }
@@ -264,14 +303,14 @@ async function loadParticipants(tournamentId, forceReload = false) {
 }
 
 function clearParticipantsCache(tournamentId) {
-  const tId = tournamentId || process.env.TOURNAMENT_ID;
+  const tId = tournamentId;
   delete participantsCache[tId];
   delete participantsDetailsCache[tId];
   delete participantsCacheLoaded[tId];
 }
 
 async function refetchParticipants(tournamentId) {
-  const tId = tournamentId || process.env.TOURNAMENT_ID;
+  const tId = tournamentId || await getActiveTournamentId();
   clearParticipantsCache(tId);
   return loadParticipants(tId, true);
 }
@@ -298,12 +337,15 @@ async function getTournamentState(tournamentId) {
 
 function buildMatchData(match, stations, participants, fallbackRelationships = {}) {
   const relationships = match.relationships || {};
-  const mergedRelationships = { ...fallbackRelationships, ...relationships };
   const timestamps = match.attributes?.timestamps || {};
   const participantEntries = match.attributes?.points_by_participant || [];
-  const player1Id = mergedRelationships.player1?.data?.id || participantEntries[0]?.participant_id;
-  const player2Id = mergedRelationships.player2?.data?.id || participantEntries[1]?.participant_id;
-  const stationId = mergedRelationships.station?.data?.id;
+  
+  const p1Rel = relationships.player1?.data?.id || fallbackRelationships.player1?.data?.id;
+  const p2Rel = relationships.player2?.data?.id || fallbackRelationships.player2?.data?.id;
+  
+  const player1Id = p1Rel || participantEntries[0]?.participant_id;
+  const player2Id = p2Rel || participantEntries[1]?.participant_id;
+  const stationId = relationships.station?.data?.id || fallbackRelationships.station?.data?.id;
 
   return {
     id: match.id,
@@ -321,7 +363,7 @@ function buildMatchData(match, stations, participants, fallbackRelationships = {
 }
 
 async function updateMatches(tournamentId) {
-  const tId = tournamentId || process.env.TOURNAMENT_ID;
+  const tId = tournamentId || await getActiveTournamentId();
   try {
     log(`[API CALL] Fetching data for tournament ID: ${tId}`);
     const matchesRes = await apiClient.get(`/tournaments/${tId}/matches.json`);
@@ -392,12 +434,11 @@ async function getMatchesData(tId) {
 }
 
 app.get("/", async (req, res) => {
-  const configuredTournamentId = process.env.TOURNAMENT_ID;
-  if (!configuredTournamentId) {
-    return res.status(500).send("TOURNAMENT_ID ist nicht in der .env gesetzt.");
-  }
+  const configuredTournamentId = await getActiveTournamentId();
+
   const state = await getTournamentState(configuredTournamentId);
-  if ((state?.displayMode || "matches") === "participants") {
+  const config = await readConfig();
+  if ((config.displayMode || "matches") === "participants") {
     const { participantDetails } = await getParticipantsFromStore(configuredTournamentId);
     return res.render("participants", {
       participants: participantDetails,
@@ -415,29 +456,48 @@ app.get("/", async (req, res) => {
 });
 
 app.get("/admin", requireAdminAuth, async (req, res) => {
-  const configuredTournamentId = process.env.TOURNAMENT_ID;
+  const configuredTournamentId = await getActiveTournamentId();
   if (!configuredTournamentId) {
     return res.status(500).send("TOURNAMENT_ID ist nicht in der .env gesetzt.");
   }
-  const { state, participantDetails } = await getParticipantsFromStore(configuredTournamentId);
+  const state = configuredTournamentId ? (await getParticipantsFromStore(configuredTournamentId)).state : { displayMode: "matches" };
+  const participantDetails = configuredTournamentId ? (await getParticipantsFromStore(configuredTournamentId)).participantDetails : [];
+  const config = await readConfig();
   return res.render("admin", {
     participantCount: participantDetails.length,
     refetchedAt: null,
     message: "",
     participants: participantDetails,
-    displayMode: state?.displayMode || "matches",
+    displayMode: config.displayMode || "matches",
+    activeTournamentId: configuredTournamentId || "",
+    overrideApiKey: overrideApiKey || "",
   });
 });
 
+
+app.post("/admin/save-config", requireAdminAuth, async (req, res) => {
+  const config = await readConfig();
+  if (req.body.tournamentId !== undefined) {
+    config.activeTournamentId = req.body.tournamentId || null;
+  }
+  if (req.body.displayMode !== undefined) {
+    config.displayMode = req.body.displayMode;
+  }
+  if (req.body.overrideApiKey !== undefined) {
+    overrideApiKey = req.body.overrideApiKey.trim() || null;
+  }
+  await writeConfig(config);
+  return res.redirect("/admin");
+});
+
 app.post("/admin/save-participants", requireAdminAuth, async (req, res) => {
-  const configuredTournamentId = process.env.TOURNAMENT_ID;
+  const configuredTournamentId = await getActiveTournamentId();
   if (!configuredTournamentId) {
     return res.status(500).send("TOURNAMENT_ID ist nicht in der .env gesetzt.");
   }
   const store = await readParticipantsStore();
   const state = store.tournaments?.[configuredTournamentId] || createEmptyParticipantState(configuredTournamentId);
   const body = req.body || {};
-  state.displayMode = body.displayMode || state.displayMode || "matches";
 
   const { participantDetails } = await getParticipantsFromStore(configuredTournamentId);
 
@@ -465,17 +525,19 @@ app.post("/admin/save-participants", requireAdminAuth, async (req, res) => {
   clearParticipantsCache(configuredTournamentId);
 
   const refreshed = await getParticipantsFromStore(configuredTournamentId);
+  const config = await readConfig();
   return res.render("admin", {
     participantCount: refreshed.participantDetails.length,
     refetchedAt: new Date().toLocaleTimeString(),
     message: "Status gespeichert.",
     participants: refreshed.participantDetails,
-    displayMode: state?.displayMode || "matches",
+    displayMode: config.displayMode || "matches",
+    activeTournamentId: configuredTournamentId || "",
   });
 });
 
 app.post("/admin/refetch-participants", requireAdminAuth, async (req, res) => {
-  const configuredTournamentId = process.env.TOURNAMENT_ID;
+  const configuredTournamentId = await getActiveTournamentId();
   if (!configuredTournamentId) {
     return res.status(500).json({ error: "TOURNAMENT_ID ist nicht in der .env gesetzt." });
   }
@@ -489,7 +551,7 @@ app.post("/admin/refetch-participants", requireAdminAuth, async (req, res) => {
 
 async function bootstrap() {
   try {
-    const configuredTournamentId = process.env.TOURNAMENT_ID;
+    const configuredTournamentId = await getActiveTournamentId();
     const state = await getTournamentState(configuredTournamentId);
     console.log(`[INITIAL] Loaded local participant store for tournament ID: ${configuredTournamentId}`);
     if ((state?.displayMode || "matches") === "participants") {
